@@ -1,14 +1,39 @@
 #!/bin/bash
+IMAGE="ztest.img"
+ENCRYPTED=0
+while getopts "eh" opt; do
+  case "${opt}" in
+    e)
+      ENCRYPTED=1
+      IMAGE="ztest-encrypted.img"
+      echo "Creating an encrypted test pool"
+      echo "Pool passphrase: zfsbootmenu"
+      ;;
+    *)
+      ;;
+  esac
+done
 
 MNT="$( mktemp -d )"
 LOOP="$( losetup -f )"
 
-qemu-img create zfsbootmenu-pool.img 1G
+qemu-img create "${IMAGE}" 1G
 
-losetup "${LOOP}" zfsbootmenu-pool.img
+losetup "${LOOP}" "${IMAGE}" 
 kpartx -u "${LOOP}"
 
 echo 'label: gpt' | sfdisk "${LOOP}"
+
+echo "zfsbootmenu" > "$( pwd )/ztest.key"
+
+if ((ENCRYPTED)) ; then
+  ENC_ARGS="-O encryption=aes-256-gcm \
+    -O keylocation=file:///$( pwd )/ztest.key \
+    -O keyformat=passphrase"
+else
+  ENC_ARGS=""
+fi
+
 zpool create -f \
  -O compression=lz4 \
  -O acltype=posixacl \
@@ -16,6 +41,7 @@ zpool create -f \
  -O relatime=on \
  -o autotrim=on \
  -o cachefile=none \
+ "${ENC_ARGS}" \
  -m none ztest "${LOOP}"
 
 zfs snapshot -r ztest@barepool
@@ -72,7 +98,7 @@ umount -R "${MNT}" && rmdir "${MNT}"
 zpool export ztest
 losetup -d "${LOOP}"
 
-chown "$( stat -c %U . ):$( stat -c %G . )" zfsbootmenu-pool.img
+chown "$( stat -c %U . ):$( stat -c %G . )" "${IMAGE}" 
 
 # Setup a local config file
 if [ ! -f local.yaml ]; then
